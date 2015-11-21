@@ -1,4 +1,4 @@
-# Thisis Makefile
+# Thisis Makefile. Does make.
 CC = gcc
 
 LIBS = -lm -lpthread\
