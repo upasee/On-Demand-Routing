@@ -3,48 +3,12 @@
 #include <sys/socket.h>
 #include <netinet/if_ether.h>
 #include <linux/if_packet.h>
-
-
-//char mesg[MAXLINE];
-void *mesg;
-//char buff[ETH_FRAME_LEN];
-void *buff;
-char *my_ip;
-struct routing_table *table;
-
-struct hw_list *result_head;
-struct hw_list {
-    int index;
-    unsigned int hw_addr[6];
-    struct hw_list *hw_next;
-};
-
-struct message{
-    int id;
-    char ip[15];
-    char buff[10];
-};
-
-struct rreq_packet{
-    int id;
-    char src_ip[15];
-    char dest_ip[15];
-    char buff[10];
-    int hop_count;
-};
-
-struct routing_table{
-    char ip[15];
-    int index;
-    char next_hop[6];
-    int hop_count;
-
-};
+#include "odr.h"
 
 void get_hw_list() {
     struct hwa_info *hwa, *hwahead;
     struct sockaddr *sa;
-    struct hw_list *result;
+    struct hw_list *new_hwl;
     int i, j, prflag;
     char *ptr;
 
@@ -63,26 +27,26 @@ void get_hw_list() {
             } while (++i < IF_HADDR);
 
             if(prflag == 1) {           
-                result = malloc(sizeof(struct hw_list));
-                result->index = hwa->if_index;
-                result->hw_next = NULL;
-                printf("result index is %d\n", result->index);
+                new_hwl = malloc(sizeof(struct hw_list));
+                new_hwl->index = hwa->if_index;
+                new_hwl->hw_next = NULL;
+                printf("result index is %d\n", new_hwl->index);
                 ptr = hwa->if_haddr;
                 i = IF_HADDR;
                 do {
-                    result->hw_addr[j++] = (*ptr++ & 0xff);
+                    new_hwl->hw_addr[j++] = (*ptr++ & 0xff);
                 } while (--i > 0);
             }
 
-            if(result_head != NULL) {
-                struct hw_list *hwl = result_head;
+            if(hwl_head != NULL) {
+                struct hw_list *hwl = hwl_head;
                 while(hwl->hw_next != NULL) {
                     hwl = hwl->hw_next;
                 }
-                hwl->hw_next = result;
+                hwl->hw_next = new_hwl;
             }
             else {
-                result_head = result;
+                hwl_head = new_hwl;
             }
         }
         else if(strcmp(hwa->if_name, "eth0") == 0)
@@ -245,7 +209,7 @@ int send_rreq(struct rreq_packet *pkt)
     //    get_hw_list();
 
 
-    struct hw_list *node = result_head;  
+    struct hw_list *node = hwl_head;  
 
 
     /*our MAC address*/
