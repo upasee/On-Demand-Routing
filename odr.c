@@ -323,43 +323,36 @@ int get_vm_num(char *ip)
     return num;
 }
 
+void convert_mac_to_string(char mac[6])
+{
+    int i =6;
+    char *ptr = mac;
+    do {
+        printf("%.2x%s", *ptr++ & 0xff, (i == 1) ? " " : ":");
+    } while (--i > 0);
+    printf("\n");
+}
+
+
 int add_to_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void *buffer)
 {
-    printf("adding to routing table\n");
-    printf("data received-------------\n");
-    printf("vm no %d\n", vm_no);
-    printf("index is %d\n", index);
-    printf("ip %s\n", msgrcv->src_ip);
-    printf("hop count %d\n", msgrcv->hop_count);
-    char str[20];
-    memcpy((void *)str, (void *)buffer+ETH_ALEN, ETH_ALEN);
-    printf("next hop %s\n", str);
-    printf("----------------------------\n");
     strcpy(table[vm_no-1].ip, msgrcv->src_ip);
     table[vm_no-1].index = index;
     table[vm_no-1].hop_count = msgrcv->hop_count;
-    strncpy(table[vm_no-1].next_hop, buffer+ETH_ALEN, ETH_ALEN); 
-    printf("----------------------\n");
-    printf("index in table %d\n", vm_no-1);
-    printf("dest ip %s\n", table[vm_no-1].ip);
-    printf("index %d\n", table[vm_no-1].index);
-    printf("hop count %d\n", table[vm_no-1].hop_count);
-    printf("next hop %s\n", table[vm_no-1].next_hop);
-    printf("----------------------\n");
-    printf("added to routing table\n");
+    memcpy((void *)table[vm_no-1].next_hop, (void *)buffer, ETH_ALEN); 
     return 0;
 }
 
 void print_routing_table()
 {
     int i;
-    printf("dest vm name----------src vm ip----------index-------------hop_count--------next hop\n");
+    printf("src vm name----------src vm ip----------index-------------hop_count--------next hop\n");
     for(i=0; i<10; i++)
     {
         if(table[i].index != 0)
         {
-            printf("here\n");
-            printf("%d-----%s------%d------%d-----%s\n",i+1, table[i].ip, table[i].index, table[i].hop_count, table[i].next_hop);
+            printf("%d---------------%s-----------------%d-----------------%d-------------",i+1, table[i].ip, table[i].index, table[i].hop_count);
+            convert_mac_to_string(table[i].next_hop);
         }
     }
 }
@@ -374,9 +367,9 @@ int receive_rreq(int s, struct rreq_packet *pkt)
     int length = 0;
     printf("blocking on receive\n");
     struct sockaddr_ll socket_address;
-    int size;
+    int size = sizeof(struct sockaddr_ll);
     //    length = recvfrom(s, buffer, ETH_FRAME_LEN, 0, NULL, NULL);
-    length = recvfrom(s, buffer, ETH_FRAME_LEN, 0, (struct sockaddr*)&socket_address, &size);
+    length = Recvfrom(s, buffer, ETH_FRAME_LEN, 0, (struct sockaddr*)&socket_address, &size);
     printf("interface is %d\n", socket_address.sll_ifindex);
     int index = socket_address.sll_ifindex;
     struct rreq_packet *msgrcv = (struct rreq_packet *)(buffer+14);
@@ -386,7 +379,6 @@ int receive_rreq(int s, struct rreq_packet *pkt)
 
     int vm_no = get_vm_num(msgrcv->src_ip);
 
-    printf("index is %d\n", index);
     add_to_routing_table(vm_no, msgrcv, index, buffer);
 
 
@@ -414,6 +406,7 @@ int receive_rreq(int s, struct rreq_packet *pkt)
         //        memcpy(mesg, msgrcv, sizeof(struct message));
         struct rreq_packet *mg = (struct rreq_packet *)mesg;
         printf("ip is %s, msg is %s\n", mg->dest_ip, mg->buff);
+        pkt->hop_count = pkt->hop_count +1;
         send_rreq(pkt);
     }    
     printf("after comparing ip\n");
