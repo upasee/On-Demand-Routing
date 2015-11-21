@@ -1,3 +1,4 @@
+# Thisis Makefile
 CC = gcc
 
 LIBS = -lm -lpthread\
