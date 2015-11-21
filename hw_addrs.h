@@ -8,6 +8,8 @@
 
 #define	IP_ALIAS  	 1	/* hwa_addr is an alias */
 
+struct hw_list *hwl_head;
+
 struct hwa_info {
   char    if_name[IF_NAME];	/* interface name, null terminated */
   char    if_haddr[IF_HADDR];	/* hardware address */
@@ -17,10 +19,16 @@ struct hwa_info {
   struct  hwa_info  *hwa_next;	/* next of these structures */
 };
 
+struct hw_list {
+	int index;
+	unsigned int hw_addr[6];
+	struct hw_list *hw_next;
+};
 
 /* function prototypes */
 struct hwa_info	*get_hw_addrs();
 struct hwa_info	*Get_hw_addrs();
 void	free_hwa_info(struct hwa_info *);
 void prhwaddrs();
-
+void get_hw_list();
+void get_client_node(char *cli_node);

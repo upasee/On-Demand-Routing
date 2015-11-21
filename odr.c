@@ -1,8 +1,3 @@
-#include "unp.h"
-#include "hw_addrs.h"
-#include <sys/socket.h>
-#include <netinet/if_ether.h>
-#include <linux/if_packet.h>
 #include "odr.h"
 
 void get_hw_list() {

@@ -1,8 +1,8 @@
-struct hw_list {
-    int index;
-    unsigned int hw_addr[6];
-    struct hw_list *hw_next;
-};
+#include "unp.h"
+#include "hw_addrs.h"
+#include <sys/socket.h>
+#include <netinet/if_ether.h>
+#include <linux/if_packet.h>
 
 struct message{
     int id;
@@ -32,5 +32,3 @@ void *mesg;
 void *buff;
 char *my_ip;
 struct routing_table *table;
-
-struct hw_list *hwl_head;

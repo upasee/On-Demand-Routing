@@ -14,11 +14,10 @@ server: server.o
 server.o: server.c
 	${CC} ${CFLAGS} -c server.c
 
-client: client.o 
-	${CC} ${FLAGS} -o client client.o ${LIBS}
+client: client.o get_hw_addrs.o
+	${CC} ${FLAGS} -o client client.o get_hw_addrs.o ${LIBS}
 client.o: client.c
 	${CC} ${CFLAGS} -c client.c
-
 
 odr: odr.o get_hw_addrs.o prhwaddrs.o
 	${CC} ${FLAGS} -o odr odr.o get_hw_addrs.o prhwaddrs.o ${LIBS}

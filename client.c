@@ -1,5 +1,6 @@
 #include "unp.h"
 #include <netdb.h>
+#include "hw_addrs.h"
 
 struct msg{
     char ip[10];
@@ -33,94 +34,64 @@ int msg_recv(int sockfd, char *buff, char *ip, int *src_port)
 
 }
 
-void dg_cli(FILE *fp, int sockfd, const SA *pservaddr, socklen_t servlen)
+void send_request(int sockfd, const SA *pservaddr, socklen_t servlen)
 {
     int n;
-//    char sendline[MAXLINE], recvline[MAXLINE + 1];
-    void *sendline;
-    sendline = (void *)malloc(sizeof(struct message));
-/*    struct hostent *host;
-
-
-    while(1)
-    {
-        char vm[3];
-        printf("Choose a VM as a server node: vm1, vm2, vm3, vm4, vm5, vm6, vm7, vm8, vm9, vm10\n");
-        scanf("%s", vm);
-        printf("vm selected is %s\n", vm);
-//        host = gethostbyname(vm);      
-//        ip =  (char *)inet_ntoa(*(struct in_addr*)host->h_addr);;
-//        msg_send(sockfd, ip, )
-        sendto(sockfd, "Nargis", 7, )      
-    }
-*/
-
-    while(1)
-    {
-    char vm[5];
-    printf("Choose a VM as a server node: vm1, vm2, vm3, vm4, vm5, vm6, vm7, vm8, vm9, vm10:\n");
-    scanf("%s", vm);
-//    Fgets(vm, 5, fp);
-    printf("The vm selected is %s\n", vm);
-    struct hostent *host = gethostbyname(vm);
-    char *ip;
-    ip = (char *)malloc(15);
-    ip = (char *)inet_ntoa(*(struct in_addr*)host->h_addr);
-    printf("IP of the selected host is %s\n", ip);
-    int size = sizeof(ip);
+    char serv_node[10], cli_node[10];
+    char  *serv_ip = malloc(20*sizeof(char));
     struct message msg;
-    msg.id = 1;
-    strcpy(msg.ip, ip);
-    strcpy(msg.buff, "message");
-    memcpy(sendline, &msg, sizeof(struct message));
 
-//    while (Fgets(sendline, MAXLINE, fp) != NULL) {
-        Sendto(sockfd, sendline, sizeof(struct message), 0, pservaddr, servlen);
-    while(1);
-//        n = Recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
-//        recvline[n] = 0; 
+    printf("Before getting the cli_node \n");
+    get_client_node(cli_node);
+    printf("Client node is %s\n", cli_node);
 
-//        Fputs(recvline, stdout);
+    while(1)
+    {
+        strcpy(serv_node,"");
+        printf("Choose a VM from vm1 to vm10 as a server node:\n");
+        scanf("%s", serv_node);
+        printf("The vm selected is %s\n", serv_node);
+        struct hostent *host = gethostbyname(serv_node);
+        strcpy(serv_ip,"");
+        Inet_ntop(AF_INET, (void*)host->h_addr, serv_ip, 20);
+        printf("IP of the selected host is %s\n", serv_ip);
+        msg.id = 1;
+        strcpy(msg.ip, serv_ip);
+        strcpy(msg.buff, "message");
+        printf("Client at node %s sending request to server at %s\n", cli_node, serv_node);
+        Sendto(sockfd, "hello", sizeof("hello"), 0, pservaddr, servlen);
     }
-
-    
 }
 
 int main(int argc, char **argv)
 {
-    int sockfd, fd;
+    char file_path[40];
+    int fd, sockfd, temp;
     struct sockaddr_un cliaddr, servaddr;
 
-//    char name[] = "/tmp/fileXXXXXX";
-//    fd = mkstemp(name);
-/*
-    sockfd = Socket(AF_LOCAL, SOCK_DGRAM, 0);
+    strcpy(file_path,"/tmp/upasi_XXXXXX");
+    fd = mkstemp(file_path);
 
-    bzero(&servaddr, sizeof(cliaddr));
-    cliaddr.sun_family = AF_LOCAL;
-//    strcpy(cliaddr.sun_path, name);
-    strcpy(cliaddr.sun_path, tmpnam(NULL));
-
-    Bind(sockfd, (SA *) &cliaddr, sizeof(cliaddr));
-
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sun_family = AF_LOCAL;
-    strcpy(servaddr.sun_path, UNIXDG_PATH);
-
-    dg_cli(stdin, sockfd, (SA *) &servaddr, sizeof(servaddr));
-*/
+    if(fd < 0) {
+        printf("Could not create a new file \n");
+        exit(-1);       
+    }
 
     sockfd = Socket(AF_LOCAL, SOCK_DGRAM, 0);
-    bzero(&cliaddr, sizeof(cliaddr));
-    cliaddr.sun_family = AF_LOCAL;
-    strcpy(cliaddr.sun_path, tmpnam(NULL));
 
-    Bind(sockfd, (SA *)&cliaddr, sizeof(cliaddr));
+    unlink(file_path);
+
+    bzero(&cliaddr,sizeof(cliaddr));
+    cliaddr.sun_family = AF_LOCAL;
+    strcpy(cliaddr.sun_path, file_path);
+    Bind(sockfd, (struct sockaddr *)&cliaddr, SUN_LEN(&cliaddr));
 
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sun_family = AF_LOCAL;
     strcpy(servaddr.sun_path, "/tmp/nargis");
 
-    dg_cli(stdin, sockfd, (SA *)&servaddr, sizeof(servaddr));
+    printf("Before sending request \n");
+    send_request(sockfd, (SA *)&servaddr, sizeof(servaddr));
+
     exit(0);
 }
