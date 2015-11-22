@@ -1,4 +1,60 @@
 #include "odr.h"
+#include "msg.h"
+
+void add_port_path_pair(int port, char *file_path) {
+    struct port_path_list *pp_new = malloc(sizeof(struct port_path_list));
+    pp_new->port = port;
+    strcpy(pp_new->path,file_path);
+    pp_new->pp_next = NULL;
+
+    if(pp_head != NULL) {
+        struct port_path_list *pp_temp = pp_head;
+        while(pp_temp->pp_next != NULL) {
+            pp_temp = pp_temp->pp_next;
+        }
+        pp_temp->pp_next = pp_new;
+    }
+    else {
+        pp_head = pp_new;
+    }
+}
+
+struct routing_table * check_routing_table(char *ip)
+{
+    int vm = get_vm_num(ip);
+    if(table[vm-1].index != 0)
+    {
+        return &table[vm-1];
+    }
+    return NULL;
+}
+
+int get_port_from_file(char *file_path) {
+    struct port_path_list *pp_temp = pp_head;
+    int port=-1;
+    while(pp_temp != NULL) {
+        if(strcmp(pp_temp->path,file_path) == 0) {
+            port = pp_temp->port;
+            break; 
+        }
+        pp_temp = pp_temp->pp_next;
+    }
+    if(port == -1) {
+        if(eph_port > 65530)
+            eph_port = 1537;
+        port = eph_port;
+        eph_port++;
+        add_port_path_pair(port, file_path);
+    }
+    return port;
+}
+
+void get_file_path_from_sock(int sockfd, char *file_path) {
+    struct sockaddr_un cliaddr;
+    int clilen = sizeof(cliaddr);
+    Getsockname(sockfd, (struct sockaddr *)&cliaddr, &clilen);
+    strcpy(file_path, cliaddr.sun_path);
+}
 
 void get_hw_list() {
     struct hwa_info *hwa, *hwahead;
@@ -49,92 +105,66 @@ void get_hw_list() {
             struct sockaddr *ip = hwa->ip_addr;
             my_ip = Sock_ntop_host(ip, sizeof(*ip));
             printf("ipaddr of eth0 %s\n", my_ip);
-            //            printf("ipaddr of eth0 %s\n", Sock_ntop_host(ip, sizeof(*ip)));
         }
     }
 
     free_hwa_info(hwahead);
-} 
+}
 
-
-
-
-void get_dg_rreq(int sockfd, SA *pcliaddr, socklen_t clilen, struct rreq_packet *pkt)
+void get_dg_rreq(int sockfd, struct rreq_packet *pkt)
 {
+    struct sockaddr_un cliaddr;
     int n;
     socklen_t len;
-    //    char mesg[MAXLINE];
-    //    mesg = (void *)malloc(MAXLINE);
-    char buff[4096];
-    time_t ticks;
-    struct timeval *tm;
+    void *buff1 = malloc(4096);
+    struct send_pack *msg1 = malloc(sizeof(struct send_pack));
 
-    //    for ( ; ; ) {
-    len = clilen;
-    n = Recvfrom(sockfd, mesg, MAXLINE, 0, pcliaddr, &len);
-    struct message *msg =  (struct message *)mesg;
-    printf("message ip %s and data %s\n", msg->ip, msg->buff);
-    //    struct rreq_packet *pkt = (struct rreq_packet *)malloc(sizeof(struct rreq_packe));
-    strcpy(pkt->dest_ip, msg->ip);
+    len = sizeof(cliaddr);
+    printf("ODR: Receiving from client\n");
+    n = Recvfrom(sockfd, msg1, MAXLINE, 0, (SA *)&cliaddr, &len);
+
+    printf("message came from client: %s\n", msg1->mesg);
+    strcpy(pkt->dest_ip, msg1->ip_addr);
     strcpy(pkt->src_ip, my_ip);
-    strcpy(pkt->buff, msg->buff);
-    pkt->id = msg->id;
+    strcpy(pkt->buff, msg1->mesg);
+    pkt->id = 1;
     pkt->hop_count = 1;
-    //        return mesg;
-
-    //        ticks = time(NULL);
-    //        snprintf(buff, sizeof(buff), "%.24s\r\n", ctime(&ticks));
-
-    //        Sendto(sockfd, buff, strlen(buff), 0, pcliaddr, len);
-    //    }
 }
 
-void send_dg_rreq(FILE *fp, int sockfd, const SA *pservaddr, socklen_t servlen, struct message *msg_srv)
+void send_dg_rreq(int sockfd, const SA *pservaddr, socklen_t servlen, struct recv_pack *rpack)
 {
-    //    char sendline[MAXLINE];
-    void *sendline;
+//    void *sendline;
 
-    sendline =(void *)malloc(sizeof(struct message));
+//    sendline =(void *)malloc(sizeof(struct recv_pack));
 
-    //    while (Fgets(sendline, MAXLINE, fp) != NULL) {
+//    memcpy(sendline, msg_srv, sizeof(struct message));
 
-    //    strcpy(sendline, buff);
-    memcpy(sendline, msg_srv, sizeof(struct message));
-
-    struct message *msg = (struct message *)sendline;
-    printf("msg ip %s and msg %s\n", msg->ip, msg->buff);
-    Sendto(sockfd, sendline, sizeof(struct message), 0, pservaddr, servlen);
-
-    //        n = Recvfrom(sockfd, recvline, MAXLINE, 0, NULL, NULL);
-    //        recvline[n] = 0;
-
-    //        Fputs(recvline, stdout);
-    //    }
+//    struct message *msg = (struct message *)sendline;
+    printf("msg ip %s and msg %s\n", rpack->ip_addr, rpack->mesg);
+//    Sendto(sockfd, sendline, sizeof(struct message), 0, pservaddr, servlen);
+    Sendto(sockfd, rpack, sizeof(struct recv_pack), 0, pservaddr, servlen);
 
 }
 
 
-int  rreq_from_client()
+int  create_client_socket()
 {
     int sockfd;
-    //    struct sockaddr_un servaddr, cliaddr;
-    struct sockaddr_un servaddr;
+    struct sockaddr_un odraddr;
 
     sockfd = Socket(AF_LOCAL, SOCK_DGRAM, 0);
-    unlink("/tmp/nargis");
+    unlink(ODR_PATH);
 
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sun_family = AF_LOCAL;
-    strcpy(servaddr.sun_path, "/tmp/nargis");
+    bzero(&odraddr, sizeof(odraddr));
+    odraddr.sun_family = AF_LOCAL;
+    strcpy(odraddr.sun_path, ODR_PATH);
 
-    Bind(sockfd, (SA *) &servaddr, sizeof(servaddr));
+    Bind(sockfd, (SA *) &odraddr, sizeof(odraddr));
 
-    //    get_dg_rreq(sockfd, (SA *) &cliaddr, sizeof(cliaddr));
     return sockfd;
-
 }
 
-void rreq_to_server(struct message *msg_srv)
+void rreq_to_server(struct recv_pack *rpack)
 {
     int sockfd;
     struct sockaddr_un servaddr, cliaddr;
@@ -150,7 +180,7 @@ void rreq_to_server(struct message *msg_srv)
     servaddr.sun_family = AF_LOCAL;
     strcpy(servaddr.sun_path, "/tmp/nargis_serv");
 
-    send_dg_rreq(stdin, sockfd, (SA *)&servaddr, sizeof(servaddr), msg_srv);
+    send_dg_rreq(sockfd, (SA *)&servaddr, sizeof(servaddr), rpack);
 }
 
 int send_to_interface(int s, int index, unsigned int mac[6], struct sockaddr_ll socket_address, void * buffer, struct rreq_packet *pkt)
@@ -171,8 +201,6 @@ int send_to_interface(int s, int index, unsigned int mac[6], struct sockaddr_ll 
 
 
     memcpy(data, pkt, sizeof(struct rreq_packet));
-    //    memcpy(data, mesg, sizeof(struct message));
-    //    strcpy(data, mesg);
 
     struct rreq_packet *msg1 = (struct rreq_packet *)data;
 
@@ -201,32 +229,15 @@ int send_rreq(struct rreq_packet *pkt)
     struct ethhdr *eh = (struct ethhdr *)etherhead;
     int send_result = 0;
 
-    //    get_hw_list();
-
-
     struct hw_list *node = hwl_head;  
 
-
-    /*our MAC address*/
-    //    unsigned char src_mac[6] = {0x00, 0x0C, 0x29, 0x49, 0x3F, 0x65};
-
-    /*other host MAC address*/
-    //    unsigned char dest_mac[6] = {0x00, 0x0C, 0x29, 0xD9, 0x08, 0xF6};
     unsigned char dest_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
     socket_address.sll_family   = PF_PACKET;
-
     socket_address.sll_protocol = htons(39356);
-
-    //    socket_address.sll_ifindex  = 3;
-
     socket_address.sll_hatype   = ARPHRD_ETHER;
-
-    //    socket_address.sll_pkttype  = PACKET_OUTGOING;
     socket_address.sll_pkttype  = PACKET_BROADCAST;
-
     socket_address.sll_halen    = ETH_ALEN; 
-
     socket_address.sll_addr[0]  = 0xFF;     
     socket_address.sll_addr[1]  = 0xFF;     
     socket_address.sll_addr[2]  = 0xFF;
@@ -238,14 +249,9 @@ int send_rreq(struct rreq_packet *pkt)
 
 
     memcpy((void*)buffer, (void*)dest_mac, ETH_ALEN);
-    //    memcpy((void*)(buffer+ETH_ALEN), (void*)src_mac, ETH_ALEN);
 
     eh->h_proto = htons(39356);
-
-    //    strcpy(data, mesg);
-    //    printf("After forming data\n");
-    //    printf("data being sent is %s\n", data+8);
-
+    
     while(node!= NULL)
     {
         printf("Eth index %d\n ", node->index);
@@ -263,6 +269,17 @@ int create_odr_socket()
     int s;
     s = socket(AF_PACKET, SOCK_RAW, htons(39356));
     return s;
+}
+
+int check_mac_are_equal(char *mac1, char *mac2)
+{
+    int i=0;
+    for(i=0; i<6; i++)
+    {
+        if(mac1[1] != mac2[i])
+            return -1;
+    }
+    return 0;
 }
 
 int get_vm_num(char *ip)
@@ -298,7 +315,17 @@ int add_to_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void 
     strcpy(table[vm_no-1].ip, msgrcv->src_ip);
     table[vm_no-1].index = index;
     table[vm_no-1].hop_count = msgrcv->hop_count;
-    memcpy((void *)table[vm_no-1].next_hop, (void *)buffer, ETH_ALEN); 
+    table[vm_no-1].last_broadcast = msgrcv->id;
+    memcpy((void *)table[vm_no-1].next_hop, (void *)buffer+ETH_ALEN, ETH_ALEN); 
+    return 0;
+}
+
+int update_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void *buffer)
+{
+    table[vm_no-1].index = index;
+    table[vm_no-1].hop_count = msgrcv->hop_count;
+    table[vm_no-1].last_broadcast = msgrcv->id;
+    memcpy((void *)table[vm_no-1].next_hop, (void *)buffer+ETH_ALEN, ETH_ALEN); 
     return 0;
 }
 
@@ -319,15 +346,12 @@ void print_routing_table()
 int receive_rreq(int s, struct rreq_packet *pkt)
 {
     printf("in receive\n");
-    //    int s;
-    //    s = socket(AF_PACKET, SOCK_RAW, htons(39356));
-    //    printf("socket created\n");
     void* buffer = (void*)malloc(ETH_FRAME_LEN);
     int length = 0;
     printf("blocking on receive\n");
     struct sockaddr_ll socket_address;
     int size = sizeof(struct sockaddr_ll);
-    //    length = recvfrom(s, buffer, ETH_FRAME_LEN, 0, NULL, NULL);
+
     length = Recvfrom(s, buffer, ETH_FRAME_LEN, 0, (struct sockaddr*)&socket_address, &size);
     printf("interface is %d\n", socket_address.sll_ifindex);
     int index = socket_address.sll_ifindex;
@@ -336,9 +360,99 @@ int receive_rreq(int s, struct rreq_packet *pkt)
     printf("Dst IP received %s\n", msgrcv->dest_ip);
     printf("my ip %s\n", my_ip);
 
+    if (strcmp(my_ip, msgrcv->src_ip) == 0)
+        return;
+
     int vm_no = get_vm_num(msgrcv->src_ip);
 
-    add_to_routing_table(vm_no, msgrcv, index, buffer);
+    struct routing_table *table_entry = check_routing_table(msgrcv->src_ip);
+
+    if(table_entry == NULL) {
+        add_to_routing_table(vm_no, msgrcv, index, buffer);
+    }
+    else {
+        if (msgrcv->id == table_entry->last_broadcast)
+        {
+            if(msgrcv->hop_count < table_entry->hop_count)
+            {
+                update_routing_table(vm_no, msgrcv, index, buffer);
+            }
+            else if(msgrcv->hop_count == table_entry->hop_count)
+            {
+                unsigned char src_mac[6];
+                memcpy(src_mac, buffer+ETH_ALEN, ETH_ALEN);
+                if(check_mac_are_equal(src_mac, table_entry->next_hop) == 0)
+                {   
+                    update_routing_table(vm_no, msgrcv, index, buffer);
+                    goto printing;
+                }
+                else
+                    return;
+            }
+            else if (msgrcv->hop_count > table_entry->hop_count)
+                return;
+        }
+        else if (msgrcv->id > table_entry->last_broadcast)
+        {
+            if (msgrcv->hop_count > table_entry->hop_count)
+            {
+                table[vm_no-1].last_broadcast = msgrcv->id;
+            }
+            else if (msgrcv->hop_count < table_entry->hop_count)
+            {
+                update_routing_table(vm_no, msgrcv, index, buffer);
+            }
+            else if (msgrcv->hop_count == table_entry->hop_count)
+            {
+                unsigned char src_mac[6];
+                memcpy(src_mac, buffer+ETH_ALEN, ETH_ALEN);
+                if(check_mac_are_equal(src_mac, table_entry->next_hop) == 0)
+                {
+                    table[vm_no-1].last_broadcast = msgrcv->id;
+                }
+                else if (check_mac_are_equal(src_mac, table_entry->next_hop) != 0)
+                {
+                    update_routing_table(vm_no, msgrcv, index, buffer);
+                }
+            }
+        }
+        else if(msgrcv->id < table_entry->last_broadcast)
+            return;
+
+    }
+
+    memcpy(pkt, msgrcv, sizeof(struct rreq_packet));
+    printf("before comparing ip\n");
+    if (strcmp(my_ip, msgrcv->dest_ip) == 0)
+    {
+        printf("meant for me\n");
+        memcpy(pkt, msgrcv, sizeof(struct rreq_packet));
+        printf("ip is %s, msg is %s\n", pkt->dest_ip, pkt->buff);
+
+        printf("send to server\n");
+
+        struct recv_pack *rpack1 = malloc(sizeof(struct recv_pack));
+//        struct message *msgsrv = (struct message *)malloc(sizeof(struct message));
+//        msgsrv->id = pkt->id;
+        strcpy(rpack1->mesg, pkt->buff);
+        strcpy(rpack1->ip_addr, pkt->dest_ip);
+
+        rreq_to_server(rpack1);      
+    }
+    else
+    {
+        printf("not meant for me\n");
+
+        //        memcpy(mesg, msgrcv, sizeof(struct message));
+ //       struct rreq_packet *mg = (struct rreq_packet *)mesg;
+ //       printf("ip is %s, msg is %s\n", mg->dest_ip, mg->buff);
+        pkt->hop_count = pkt->hop_count +1;
+        send_rreq(pkt);
+    }    
+    printf("after comparing ip\n");
+
+    printing:
+    print_routing_table();
 
 
     memcpy(pkt, msgrcv, sizeof(struct rreq_packet));
@@ -352,19 +466,15 @@ int receive_rreq(int s, struct rreq_packet *pkt)
 
         printf("send to server\n");
 
-        struct message *msgsrv = (struct message *)malloc(sizeof(struct message));
-        msgsrv->id = pkt->id;
-        strcpy(msgsrv->buff, pkt->buff);
-        strcpy(msgsrv->ip, pkt->dest_ip);
+        struct recv_pack *rpack2 = malloc(sizeof(struct recv_pack));
+        strcpy(rpack2->mesg, pkt->buff);
+        strcpy(rpack2->ip_addr, pkt->dest_ip);
 
-        rreq_to_server(msgsrv);      
+        rreq_to_server(rpack2);      
     }
     else
     {
         printf("not meant for me\n");
-        //        memcpy(mesg, msgrcv, sizeof(struct message));
-        struct rreq_packet *mg = (struct rreq_packet *)mesg;
-        printf("ip is %s, msg is %s\n", mg->dest_ip, mg->buff);
         pkt->hop_count = pkt->hop_count +1;
         send_rreq(pkt);
     }    
@@ -384,21 +494,19 @@ int main(int argc, char **argv)
     prhwaddrs();
 
     get_hw_list();
-    mesg = (void *)malloc(sizeof(struct message));
-    buff = (void *)malloc(sizeof(struct message));
-
+    
     table = (struct routing_table *)malloc(10 * sizeof(struct routing_table));
 
 
-    printf("before memset\n");
     memset(table, 0, 10*sizeof(struct routing_table));
-    printf("after memset\n");
 
     int sockfd;
-    sockfd = rreq_from_client();
+    sockfd = create_client_socket();
 
     int sockfd_odr;
     sockfd_odr = create_odr_socket();
+
+    add_port_path_pair(SERV_PORT_NO, SERV_PATH);
 
     fd_set rset;
 
@@ -409,28 +517,22 @@ int main(int argc, char **argv)
 
     int max = max(sockfd, sockfd_odr);
 
-    printf("before select\n");
+    while(1) {
 
-    Select(max+1, &rset, NULL, NULL, NULL);
+        Select(max+1, &rset, NULL, NULL, NULL);
 
-    if (FD_ISSET(sockfd, &rset))
-    {
-        struct sockaddr_un cliaddr;
-        struct rreq_packet *pkt = (struct rreq_packet *)malloc(sizeof(struct rreq_packet));
-        get_dg_rreq(sockfd, (SA *) &cliaddr, sizeof(cliaddr), pkt);
-        send_rreq(pkt);
+        if (FD_ISSET(sockfd, &rset))
+        {
+            printf("Client select \n");
+            struct rreq_packet *pkt = (struct rreq_packet *)malloc(sizeof(struct rreq_packet));
+            get_dg_rreq(sockfd, pkt);
+            send_rreq(pkt);
+        }
+        else if(FD_ISSET(sockfd_odr, &rset))
+        {
+            printf("odr select \n");
+            struct rreq_packet *pkt = (struct rreq_packet *)malloc(sizeof(struct rreq_packet));
+            receive_rreq(sockfd_odr, pkt);
+        }
     }
-    else if(FD_ISSET(sockfd_odr, &rset))
-    {
-        printf("here\n");
-        struct rreq_packet *pkt = (struct rreq_packet *)malloc(sizeof(struct rreq_packet));
-        receive_rreq(sockfd_odr, pkt);
-    }
-    /*
-       rreq_from_client();
-       send_rreq();
-       receive_rreq();
-       rreq_to_server();
-     */
 }
-

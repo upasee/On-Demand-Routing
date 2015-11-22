@@ -1,73 +1,16 @@
-#include "unp.h"
 #include <netdb.h>
 #include "hw_addrs.h"
+#include "unp.h"
+#include "msg.h"
 
-struct msg{
-    char ip[10];
-    int dest_port;
-    char buff[500];
-    int flag;
-};
-
-struct message{
-    int id;
-    char ip[15];
-    char buff[10];
-};
-
-int msg_send(int sockfd, char *ip, int dest_port, char *buff, int flag)
-{
-    struct msg *msg1 = (struct msg *)malloc(sizeof(struct msg));
-    strncpy(msg1->ip, ip, 10);
-    msg1->dest_port = dest_port;
-    strncpy(msg1->buff, buff, strlen(buff));
-    msg1->flag = flag;
-
-    //write(sockfd, (void *)msg1, sizeof(struct msg)); 
-//    sendto(sockfd, (void *)msg1, sizeof(struct msg), 0);
-}
-
-int msg_recv(int sockfd, char *buff, char *ip, int *src_port)
-{
-    struct msg *msg1 = (struct msg *)malloc(sizeof (struct msg));
-    int one = read(sockfd, (void *)msg1, sizeof(struct msg));
-
-}
-
-void send_request(int sockfd, const SA *pservaddr, socklen_t servlen)
-{
-    int n;
-    char serv_node[10], cli_node[10];
-    char  *serv_ip = malloc(20*sizeof(char));
-    struct message msg;
-
-    printf("Before getting the cli_node \n");
-    get_client_node(cli_node);
-    printf("Client node is %s\n", cli_node);
-
-    while(1)
-    {
-        strcpy(serv_node,"");
-        printf("Choose a VM from vm1 to vm10 as a server node:\n");
-        scanf("%s", serv_node);
-        printf("The vm selected is %s\n", serv_node);
-        struct hostent *host = gethostbyname(serv_node);
-        strcpy(serv_ip,"");
-        Inet_ntop(AF_INET, (void*)host->h_addr, serv_ip, 20);
-        printf("IP of the selected host is %s\n", serv_ip);
-        msg.id = 1;
-        strcpy(msg.ip, serv_ip);
-        strcpy(msg.buff, "message");
-        printf("Client at node %s sending request to server at %s\n", cli_node, serv_node);
-        Sendto(sockfd, "hello", sizeof("hello"), 0, pservaddr, servlen);
-    }
-}
-
-int main(int argc, char **argv)
-{
-    char file_path[40];
-    int fd, sockfd, temp;
-    struct sockaddr_un cliaddr, servaddr;
+void main(int argc, char **argv) {
+    int fd, sockfd, temp, n, recv_port, forced_disc;
+    struct timeval t;
+    struct sockaddr_un cliaddr;
+    char serv_node[10], cli_node[10], file_path[40], sendline[1024], recvline[1024], send_ip[20], recv_ip[20];
+    struct hostent *host;
+    fd_set rset;
+    FD_ZERO(&rset);
 
     strcpy(file_path,"/tmp/upasi_XXXXXX");
     fd = mkstemp(file_path);
@@ -86,12 +29,64 @@ int main(int argc, char **argv)
     strcpy(cliaddr.sun_path, file_path);
     Bind(sockfd, (struct sockaddr *)&cliaddr, SUN_LEN(&cliaddr));
 
-    bzero(&servaddr, sizeof(servaddr));
-    servaddr.sun_family = AF_LOCAL;
-    strcpy(servaddr.sun_path, "/tmp/nargis");
+    printf("Before getting the cli_node \n");
+    get_client_node(cli_node);
+    printf("Client node is %s\n", cli_node);
+    
+    while(1)
+    {
+        forced_disc = 0;
+        strcpy(serv_node,"");
+        printf("Choose a VM from vm1 to vm10 as a server node:\n");
+        scanf("%s", serv_node);
+        if(strcmp(serv_node,"exit") == 0) {
+            break;
+        }
 
-    printf("Before sending request \n");
-    send_request(sockfd, (SA *)&servaddr, sizeof(servaddr));
+        if((host = gethostbyname(serv_node)) == NULL) {
+            printf("Invalid input\n");
+            continue;
+        }
 
+        if(strncmp(serv_node,"vm",2) != 0) {
+            printf("Invalid input\n");
+            continue;
+        }
+
+        printf("The vm selected is %s\n", serv_node);
+        strcpy(send_ip,"");
+        Inet_ntop(AF_INET, (void*)host->h_addr, send_ip, 20);
+        printf("IP of the selected host is %s\n", send_ip);
+
+        strcpy(sendline,"time");        
+
+send_message:
+        printf("Client at node %s sending request to server at %s\n", cli_node, serv_node);
+        printf("Preparing to send message \n");
+        msg_send(sockfd, send_ip, SERV_PORT_NO, sendline, 0);
+
+        FD_SET(sockfd, &rset);
+        t.tv_sec = 8;
+        t.tv_usec = 0;
+        Select(sockfd+1, &rset, NULL, NULL, &t);
+
+        if(FD_ISSET(sockfd, &rset)) {
+            msg_recv(sockfd, recvline, recv_ip, &recv_port);
+            printf("Client at node %s: received from %s %s\n", cli_node,serv_node, recvline);
+        }
+        else {
+            if(forced_disc == 0) {
+                forced_disc = 1;
+                printf("Client at node %s: timeout on response from %s\n", cli_node, serv_node);
+                goto send_message;
+            }
+            else {
+                printf("Forced discovery unsuccessful \n");
+                continue;
+            }
+        }
+    }
+
+    unlink(cliaddr.sun_path);
     exit(0);
 }

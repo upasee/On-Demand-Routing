@@ -11,10 +11,7 @@ void get_host_name(char *serv_ip, char * cli_node) {
 	struct hostent *host;
 
 	Inet_pton(AF_INET, serv_ip, &ipv4addr);
-
-//	printf("IP address is %s\n",serv_ip);
 	host = gethostbyaddr(&ipv4addr, sizeof(ipv4addr), AF_INET);
-//	printf("Host name is %s\n", host2->h_name);
 	strcpy(cli_node,host->h_name);
 }
 
