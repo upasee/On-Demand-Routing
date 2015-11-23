@@ -19,8 +19,7 @@ void add_port_path_pair(int port, char *file_path) {
     }
 }
 
-struct routing_table * check_routing_table(char *ip)
-{
+struct routing_table * check_routing_table(char *ip) {
     int vm = get_vm_num(ip);
     if(table[vm-1].index != 0)
     {
@@ -40,8 +39,8 @@ int get_port_from_file(char *file_path) {
         pp_temp = pp_temp->pp_next;
     }
     if(port == -1) {
-        if(eph_port > 65530)
-            eph_port = 1537;
+        if(eph_port > PORT_MAX)
+            eph_port = PORT_MIN;
         port = eph_port;
         eph_port++;
         add_port_path_pair(port, file_path);
@@ -111,17 +110,126 @@ void get_hw_list() {
     free_hwa_info(hwahead);
 }
 
-void get_dg_rreq(int sockfd, struct rreq_packet *pkt)
-{
+int send_payload(struct payload *pay) {
+    int s;
+    s = socket(AF_PACKET, SOCK_RAW, htons(39356));
+
+    printf("socket for payload created\n");
+
+    struct sockaddr_ll socket_address;
+    void *buffer = (void *)malloc(ETH_FRAME_LEN);
+    unsigned char *etherhead = buffer;
+    unsigned char *data = buffer + 14;
+    struct ethhdr *eh = (struct ethhdr *)etherhead;
+    int send_result = 0;
+    int vm_no = get_vm_num(pay->dest_ip);
+    struct routing_table *entry = check_routing_table(pay->dest_ip);
+    unsigned char dest_mac[6];
+    memcpy(dest_mac, entry->next_hop, ETH_ALEN);
+
+    socket_address.sll_family = PF_PACKET;
+    socket_address.sll_protocol = htons(39356);
+    socket_address.sll_hatype   = ARPHRD_ETHER;
+    socket_address.sll_ifindex  = entry->index;
+    socket_address.sll_hatype   = ARPHRD_ETHER;
+    socket_address.sll_pkttype  = PACKET_OUTGOING;
+    socket_address.sll_halen    = ETH_ALEN;
+
+    socket_address.sll_addr[0]  = entry->next_hop[0];
+    socket_address.sll_addr[1]  = entry->next_hop[1];
+    socket_address.sll_addr[2]  = entry->next_hop[2];
+    socket_address.sll_addr[3]  = entry->next_hop[3];
+    socket_address.sll_addr[4]  = entry->next_hop[4];
+    socket_address.sll_addr[5]  = entry->next_hop[5];
+    socket_address.sll_addr[6]  = 0x00;/*not used*/
+    socket_address.sll_addr[7]  = 0x00;/*not used*/
+
+    eh->h_proto = htons(39356);
+
+    memcpy((void*)buffer, (void*)dest_mac, ETH_ALEN);
+
+    struct hw_list *entry_mac = (struct hw_list *)malloc(sizeof(struct hw_list));
+    get_mac_from_interface(entry->index, entry_mac);
+
+    unsigned char src_mac[6];
+    int i;
+    for (i =0; i<6; i++)
+        src_mac[i] = entry_mac->hw_addr[i];
+
+    socket_address.sll_ifindex  = entry->index;
+
+    memcpy((void*)(buffer+ETH_ALEN), (void*)src_mac, ETH_ALEN);
+    memcpy(data, pay, sizeof(struct payload));
+
+    struct payload *msg1 = (struct payload *)data;
+
+    printf("data being sent is %s\n", msg1->buff);
+
+    send_result = sendto(s, buffer, ETH_FRAME_LEN, 0, (struct sockaddr*)&socket_address, sizeof(socket_address));
+
+    printf("after sending, send return: %d\n", send_result);
+    return 0;
+}
+
+int send_rrep(struct rreq_packet *pkt) {
+    int s;
+    s = socket(AF_PACKET, SOCK_RAW, htons(39356));
+
+    printf("socket for rrep created\n");
+
+    struct sockaddr_ll socket_address;
+    void* buffer = (void *)malloc(ETH_FRAME_LEN);
+    unsigned char * etherhead = buffer;
+    unsigned char * data = buffer + 14;
+    struct ethhdr *eh = (struct ethhdr *)etherhead;
+    int send_result = 0;
+    int vm_no = get_vm_num(pkt->dest_ip);
+    struct routing_table *entry = check_routing_table(pkt->dest_ip);
+    unsigned char dest_mac[6];
+    memcpy(dest_mac, entry->next_hop, ETH_ALEN);
+
+    socket_address.sll_family = PF_PACKET; 
+    socket_address.sll_protocol = htons(39356);
+    socket_address.sll_hatype   = ARPHRD_ETHER;
+    socket_address.sll_ifindex  = entry->index;
+    socket_address.sll_hatype   = ARPHRD_ETHER;
+    socket_address.sll_pkttype  = PACKET_OUTGOING;
+    socket_address.sll_halen    = ETH_ALEN;
+
+    socket_address.sll_addr[0]  = entry->next_hop[0];
+    socket_address.sll_addr[1]  = entry->next_hop[1];
+    socket_address.sll_addr[2]  = entry->next_hop[2];
+    socket_address.sll_addr[3]  = entry->next_hop[3];
+    socket_address.sll_addr[4]  = entry->next_hop[4];
+    socket_address.sll_addr[5]  = entry->next_hop[5];
+    socket_address.sll_addr[6]  = 0x00;/*not used*/
+    socket_address.sll_addr[7]  = 0x00;/*not used*/
+
+    eh->h_proto = htons(39356);
+
+    memcpy((void*)buffer, (void*)dest_mac, ETH_ALEN);
+
+    struct hw_list *entry_mac = (struct hw_list *)malloc(sizeof(struct hw_list));
+    get_mac_from_interface(entry->index, entry_mac);
+
+    send_to_interface(s, entry->index, entry_mac->hw_addr, socket_address, buffer, pkt);
+
+}
+
+void get_dg_rreq(int sockfd, struct rreq_packet *pkt) {
     struct sockaddr_un cliaddr;
     int n;
     socklen_t len;
     void *buff1 = malloc(4096);
+    char file_path[40];
     struct send_pack *msg1 = malloc(sizeof(struct send_pack));
 
     len = sizeof(cliaddr);
     printf("ODR: Receiving from client\n");
     n = Recvfrom(sockfd, msg1, MAXLINE, 0, (SA *)&cliaddr, &len);
+
+    get_file_path_from_sock(sockfd, file_path);
+    get_port_from_file(file_path);
 
     printf("message came from client: %s\n", msg1->mesg);
     strcpy(pkt->dest_ip, msg1->ip_addr);
@@ -131,24 +239,7 @@ void get_dg_rreq(int sockfd, struct rreq_packet *pkt)
     pkt->hop_count = 1;
 }
 
-void send_dg_rreq(int sockfd, const SA *pservaddr, socklen_t servlen, struct recv_pack *rpack)
-{
-//    void *sendline;
-
-//    sendline =(void *)malloc(sizeof(struct recv_pack));
-
-//    memcpy(sendline, msg_srv, sizeof(struct message));
-
-//    struct message *msg = (struct message *)sendline;
-    printf("msg ip %s and msg %s\n", rpack->ip_addr, rpack->mesg);
-//    Sendto(sockfd, sendline, sizeof(struct message), 0, pservaddr, servlen);
-    Sendto(sockfd, rpack, sizeof(struct recv_pack), 0, pservaddr, servlen);
-
-}
-
-
-int  create_client_socket()
-{
+int  create_client_socket() {
     int sockfd;
     struct sockaddr_un odraddr;
 
@@ -160,12 +251,10 @@ int  create_client_socket()
     strcpy(odraddr.sun_path, ODR_PATH);
 
     Bind(sockfd, (SA *) &odraddr, sizeof(odraddr));
-
     return sockfd;
 }
 
-void rreq_to_server(struct recv_pack *rpack)
-{
+void rreq_to_server(struct recv_pack *rpack) {
     int sockfd;
     struct sockaddr_un servaddr, cliaddr;
 
@@ -178,16 +267,15 @@ void rreq_to_server(struct recv_pack *rpack)
 
     bzero(&servaddr, sizeof(servaddr));
     servaddr.sun_family = AF_LOCAL;
-    strcpy(servaddr.sun_path, "/tmp/nargis_serv");
+    strcpy(servaddr.sun_path, SERV_PATH);
 
-    send_dg_rreq(sockfd, (SA *)&servaddr, sizeof(servaddr), rpack);
+    printf("msg ip %s and msg %s\n", rpack->ip_addr, rpack->mesg);
+    Sendto(sockfd, rpack, sizeof(struct recv_pack), 0, (SA *)&servaddr, sizeof(servaddr));
+
 }
 
-int send_to_interface(int s, int index, unsigned int mac[6], struct sockaddr_ll socket_address, void * buffer, struct rreq_packet *pkt)
-{
-
-    //    unsigned char* data = buffer + 14;
-
+int send_to_interface(int s, int index, unsigned int mac[6], struct sockaddr_ll socket_address, void * buffer, struct rreq_packet *pkt) {
+    printf("in ");
     void *data = buffer+14;
 
     unsigned char src_mac[6];
@@ -198,8 +286,6 @@ int send_to_interface(int s, int index, unsigned int mac[6], struct sockaddr_ll 
     socket_address.sll_ifindex  = index;
 
     memcpy((void*)(buffer+ETH_ALEN), (void*)src_mac, ETH_ALEN);
-
-
     memcpy(data, pkt, sizeof(struct rreq_packet));
 
     struct rreq_packet *msg1 = (struct rreq_packet *)data;
@@ -214,11 +300,10 @@ int send_to_interface(int s, int index, unsigned int mac[6], struct sockaddr_ll 
 
 }
 
-int send_rreq(struct rreq_packet *pkt)
-{
+int send_rreq(struct rreq_packet *pkt) {
     printf("in send\n");
     int s;
-    s = socket(AF_PACKET, SOCK_RAW, htons(39356));
+    s = socket(AF_PACKET, SOCK_RAW, htons(SERV_PORT_NO));
 
     printf("socket created!\n");
 
@@ -234,7 +319,7 @@ int send_rreq(struct rreq_packet *pkt)
     unsigned char dest_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
 
     socket_address.sll_family   = PF_PACKET;
-    socket_address.sll_protocol = htons(39356);
+    socket_address.sll_protocol = htons(SERV_PORT_NO);
     socket_address.sll_hatype   = ARPHRD_ETHER;
     socket_address.sll_pkttype  = PACKET_BROADCAST;
     socket_address.sll_halen    = ETH_ALEN; 
@@ -250,7 +335,7 @@ int send_rreq(struct rreq_packet *pkt)
 
     memcpy((void*)buffer, (void*)dest_mac, ETH_ALEN);
 
-    eh->h_proto = htons(39356);
+    eh->h_proto = htons(SERV_PORT_NO);
     
     while(node!= NULL)
     {
@@ -259,20 +344,30 @@ int send_rreq(struct rreq_packet *pkt)
         node = node->hw_next;
     }
 
-    //    send_result = sendto(s, buffer, ETH_FRAME_LEN, 0, (struct sockaddr*)&socket_address, sizeof(socket_address));
-
     return 0;
 }
 
-int create_odr_socket()
-{
+int create_odr_socket() {
     int s;
-    s = socket(AF_PACKET, SOCK_RAW, htons(39356));
+    
+    s = socket(AF_PACKET, SOCK_RAW, htons(SERV_PORT_NO));
     return s;
 }
 
-int check_mac_are_equal(char *mac1, char *mac2)
-{
+void get_mac_from_interface(int index, struct hw_list *entry) {
+    struct hw_list *node = result_head;
+    while(node)
+    {
+        if (index == node->index)
+        {
+            memcpy(entry, node, sizeof(struct hw_list));
+            return;
+        }
+        node = node->hw_next;
+    }
+}
+
+int check_mac_are_equal(char *mac1, char *mac2) {
     int i=0;
     for(i=0; i<6; i++)
     {
@@ -282,8 +377,7 @@ int check_mac_are_equal(char *mac1, char *mac2)
     return 0;
 }
 
-int get_vm_num(char *ip)
-{
+int get_vm_num(char *ip) {
     struct in_addr ipv4addr;
     Inet_pton(AF_INET, ip, &ipv4addr);
 
@@ -299,8 +393,7 @@ int get_vm_num(char *ip)
     return num;
 }
 
-void convert_mac_to_string(char mac[6])
-{
+void convert_mac_to_string(char mac[6]) {
     int i =6;
     char *ptr = mac;
     do {
@@ -309,9 +402,7 @@ void convert_mac_to_string(char mac[6])
     printf("\n");
 }
 
-
-int add_to_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void *buffer)
-{
+int add_to_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void *buffer) {
     strcpy(table[vm_no-1].ip, msgrcv->src_ip);
     table[vm_no-1].index = index;
     table[vm_no-1].hop_count = msgrcv->hop_count;
@@ -320,8 +411,7 @@ int add_to_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void 
     return 0;
 }
 
-int update_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void *buffer)
-{
+int update_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void *buffer) {
     table[vm_no-1].index = index;
     table[vm_no-1].hop_count = msgrcv->hop_count;
     table[vm_no-1].last_broadcast = msgrcv->id;
@@ -329,8 +419,7 @@ int update_routing_table(int vm_no, struct rreq_packet *msgrcv, int index, void 
     return 0;
 }
 
-void print_routing_table()
-{
+void print_routing_table() {
     int i;
     printf("src vm name----------src vm ip----------index-------------hop_count--------next hop\n");
     for(i=0; i<10; i++)
@@ -343,8 +432,181 @@ void print_routing_table()
     }
 }
 
-int receive_rreq(int s, struct rreq_packet *pkt)
-{
+int handle_payload(struct payload *pay, void *buffer, struct sockaddr_ll socket_address) {
+    printf("IN HANDLE PAYLOAD\n");
+    printf("interface is %d\n", socket_address.sll_ifindex);
+    int index = socket_address.sll_ifindex;
+    struct payload *msgrcv = (struct payload *)(buffer+14);
+    struct routing_table *table_entry = check_routing_table(msgrcv->src_ip);
+
+    int vm_no = get_vm_num(msgrcv->src_ip);
+    if (strcmp(my_ip, msgrcv->dest_ip) == 0)
+    {
+        printf("Payload for me\n");
+        printf("send to server\n");
+
+        struct recv_pack *rpack = malloc(sizeof(struct recv_pack));
+        strcpy(rpack->mesg, pay->buff);
+        strcpy(rpack->ip_addr, pay->dest_ip);
+        rreq_to_server(rpack);
+    }
+
+    else
+    {
+        printf("not for me\n");
+        pay->hop_count = pay->hop_count  +1;
+        send_payload(pay);
+    }
+    print_routing_table();
+}
+
+int handle_rrep(struct rreq_packet *pkt, void *buffer, struct sockaddr_ll socket_address) {
+    printf("IN HANDLE RREP\n");
+    printf("interface is %d\n", socket_address.sll_ifindex);
+    int index = socket_address.sll_ifindex;
+    struct rreq_packet *msgrcv = (struct rreq_packet *)(buffer+14);
+    struct routing_table *table_entry = check_routing_table(msgrcv->src_ip);
+
+    int vm_no = get_vm_num(msgrcv->src_ip);
+    if (table_entry == NULL)
+    {
+        add_to_routing_table(vm_no, msgrcv, index, buffer);
+    }
+    else
+    {
+        if(msgrcv->hop_count < table_entry->hop_count)
+        {
+            update_routing_table(vm_no, msgrcv, index, buffer);
+        }
+    }
+    if (strcmp(my_ip, msgrcv->dest_ip) == 0)
+    {
+        printf("RREp for me\n");
+
+        struct payload *pay = (struct payload *)malloc(sizeof(struct payload));
+        pay->id = 0;
+        memcpy(pay->src_ip, msgrcv->dest_ip, 15);
+        memcpy(pay->dest_ip, msgrcv->src_ip, 15);
+        pay->hop_count = 1;
+        pay->payload = 5;
+        strcpy(pay->buff, "time");
+
+        send_payload(pay);
+
+    }
+    else
+    {
+        printf("not for me\n");
+        pkt->hop_count = pkt->hop_count  +1;
+        send_rrep(pkt);
+    }
+    print_routing_table();
+
+}
+
+int handle_rreq(struct rreq_packet *pkt, void *buffer, struct sockaddr_ll socket_address) {
+    printf("interface is %d\n", socket_address.sll_ifindex);
+    int index = socket_address.sll_ifindex;
+    struct rreq_packet *msgrcv = (struct rreq_packet *)(buffer+14);
+    printf("Data received %s\n", msgrcv->buff);
+    printf("Dst IP received %s\n", msgrcv->dest_ip);
+    printf("my ip %s\n", my_ip);
+
+    if (strcmp(my_ip, msgrcv->src_ip) == 0)
+        return;
+
+    int vm_no = get_vm_num(msgrcv->src_ip);
+
+    struct routing_table *table_entry = check_routing_table(msgrcv->src_ip);
+
+    if(table_entry == NULL)
+    {
+        add_to_routing_table(vm_no, msgrcv, index, buffer);
+    }
+    else
+    {
+        if (msgrcv->id == table_entry->last_broadcast)
+        {
+            if(msgrcv->hop_count < table_entry->hop_count)
+            {
+                update_routing_table(vm_no, msgrcv, index, buffer);
+            }
+            else if(msgrcv->hop_count == table_entry->hop_count)
+            {
+                unsigned char src_mac[6];
+                memcpy(src_mac, buffer+ETH_ALEN, ETH_ALEN);
+                if(check_mac_are_equal(src_mac, table_entry->next_hop) == 0)
+                {   
+                    update_routing_table(vm_no, msgrcv, index, buffer);
+                    goto printing;
+                }
+                else
+                    return;
+            }
+            else if (msgrcv->hop_count > table_entry->hop_count)
+                return;
+        }
+        else if (msgrcv->id > table_entry->last_broadcast)
+        {
+            if (msgrcv->hop_count > table_entry->hop_count)
+            {
+                table[vm_no-1].last_broadcast = msgrcv->id;
+            }
+            else if (msgrcv->hop_count < table_entry->hop_count)
+            {
+                update_routing_table(vm_no, msgrcv, index, buffer);
+            }
+            else if (msgrcv->hop_count == table_entry->hop_count)
+            {
+                unsigned char src_mac[6];
+                memcpy(src_mac, buffer+ETH_ALEN, ETH_ALEN);
+                if(check_mac_are_equal(src_mac, table_entry->next_hop) == 0)
+                {
+                    table[vm_no-1].last_broadcast = msgrcv->id;
+                }
+                else if (check_mac_are_equal(src_mac, table_entry->next_hop) != 0)
+                {
+                    update_routing_table(vm_no, msgrcv, index, buffer);
+                }
+            }
+        }
+        else if(msgrcv->id < table_entry->last_broadcast)
+            return;
+
+    }
+
+    memcpy(pkt, msgrcv, sizeof(struct rreq_packet));
+    printf("before comparing ip\n");
+    if (strcmp(my_ip, msgrcv->dest_ip) == 0)
+    {
+        printf("meant for me\n");
+        memcpy(pkt, msgrcv, sizeof(struct rreq_packet));
+        printf("ip is %s, msg is %s\n", pkt->dest_ip, pkt->buff);
+
+        struct rreq_packet *rrep = (struct rreq_packet *)malloc(sizeof(struct rreq_packet));
+        rrep->id = 0;
+        memcpy(rrep->src_ip, msgrcv->dest_ip, 15);
+        memcpy(rrep->dest_ip, msgrcv->src_ip, 15);
+        rrep->hop_count = 1;
+        strcpy(rrep->buff, "got it");
+        send_rrep(rrep);
+
+    }
+    else
+    {
+        printf("not meant for me\n");
+        pkt->hop_count = pkt->hop_count +1;
+        send_rreq(pkt);
+    }    
+    printf("after comparing ip\n");
+
+printing:
+    print_routing_table();
+
+}
+
+
+int receive_rreq(int s, struct rreq_packet *pkt) {
     printf("in receive\n");
     void* buffer = (void*)malloc(ETH_FRAME_LEN);
     int length = 0;
@@ -432,8 +694,6 @@ int receive_rreq(int s, struct rreq_packet *pkt)
         printf("send to server\n");
 
         struct recv_pack *rpack1 = malloc(sizeof(struct recv_pack));
-//        struct message *msgsrv = (struct message *)malloc(sizeof(struct message));
-//        msgsrv->id = pkt->id;
         strcpy(rpack1->mesg, pkt->buff);
         strcpy(rpack1->ip_addr, pkt->dest_ip);
 
@@ -442,10 +702,6 @@ int receive_rreq(int s, struct rreq_packet *pkt)
     else
     {
         printf("not meant for me\n");
-
-        //        memcpy(mesg, msgrcv, sizeof(struct message));
- //       struct rreq_packet *mg = (struct rreq_packet *)mesg;
- //       printf("ip is %s, msg is %s\n", mg->dest_ip, mg->buff);
         pkt->hop_count = pkt->hop_count +1;
         send_rreq(pkt);
     }    
@@ -460,7 +716,6 @@ int receive_rreq(int s, struct rreq_packet *pkt)
     if (strcmp(my_ip, msgrcv->dest_ip) == 0)
     {
         printf("meant for me\n");
-        //        strcpy(buff, (char *)buffer + 14);
         memcpy(pkt, msgrcv, sizeof(struct rreq_packet));
         printf("ip is %s, msg is %s\n", pkt->dest_ip, pkt->buff);
 
@@ -479,16 +734,11 @@ int receive_rreq(int s, struct rreq_packet *pkt)
         send_rreq(pkt);
     }    
     printf("after comparing ip\n");
-
     print_routing_table();
 
-    //    strcpy(buff, (char *)buffer + 14);
 }
 
-
-
-int main(int argc, char **argv)
-{
+int main(int argc, char **argv) {
     struct hwa_info *hw;
     hw = get_hw_addrs();
     prhwaddrs();
@@ -496,8 +746,6 @@ int main(int argc, char **argv)
     get_hw_list();
     
     table = (struct routing_table *)malloc(10 * sizeof(struct routing_table));
-
-
     memset(table, 0, 10*sizeof(struct routing_table));
 
     int sockfd;
@@ -530,9 +778,26 @@ int main(int argc, char **argv)
         }
         else if(FD_ISSET(sockfd_odr, &rset))
         {
-            printf("odr select \n");
-            struct rreq_packet *pkt = (struct rreq_packet *)malloc(sizeof(struct rreq_packet));
-            receive_rreq(sockfd_odr, pkt);
+            void* buffer = (void*)malloc(ETH_FRAME_LEN);
+            int length = 0;
+            printf("blocking on receive\n");
+            struct sockaddr_ll socket_address;
+            int size = sizeof(struct sockaddr_ll);
+            length = Recvfrom(sockfd_odr, buffer, ETH_FRAME_LEN, 0, (struct sockaddr*)&socket_address, &size);
+            struct payload *pay = (struct payload *)(buffer + 14);
+            if (pay->payload == 5)
+            {
+                handle_payload(pay, buffer, socket_address);
+            }
+            else
+            {
+                struct rreq_packet *pkt = (struct rreq_packet *)(buffer+14);
+                if (pkt->id != 0)
+                    handle_rreq(pkt, buffer, socket_address);
+                else
+                    handle_rrep(pkt, buffer, socket_address);
+            }
+
         }
     }
 }

@@ -33,6 +33,15 @@ struct routing_table{
 
 };
 
+struct payload{
+    int id;
+    int payload;
+    char src_ip[15];
+    char dest_ip[15];
+    char buff[10];
+    int hop_count;
+};
+
 char *my_ip;
 struct routing_table *table;
 struct port_path_list *pp_head;

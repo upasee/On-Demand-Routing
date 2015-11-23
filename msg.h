@@ -1,6 +1,6 @@
 #include "unp.h"
 
-#define SERV_PORT_NO	5526
+#define SERV_PORT_NO	34499
 #define SERV_PATH	"/tmp/nargis"
 #define ODR_PATH	"/tmp/upasi"
 
